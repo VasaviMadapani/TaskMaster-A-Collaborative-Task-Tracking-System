@@ -1,0 +1,154 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ProjectRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model User {
+  id              String           @id @default(uuid()) @db.Uuid
+  email           String           @unique @db.VarChar(320)
+  name            String           @db.VarChar(120)
+  passwordHash    String           @map("password_hash") @db.VarChar(255)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  memberships     ProjectMember[]
+  createdProjects Project[]        @relation("ProjectCreator")
+  createdTasks    Task[]           @relation("TaskCreator")
+  assignedTasks   Task[]           @relation("TaskAssignee")
+  comments        Comment[]
+  refreshSessions RefreshSession[]
+
+  @@map("users")
+}
+
+model Project {
+  id          String          @id @default(uuid()) @db.Uuid
+  name        String          @db.VarChar(120)
+  description String?         @db.VarChar(2000)
+  createdById String          @map("created_by_id") @db.Uuid
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdBy   User            @relation("ProjectCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  members     ProjectMember[]
+  tasks       Task[]
+  invites     ProjectInvite[]
+
+  @@index([createdById])
+  @@map("projects")
+}
+
+model ProjectMember {
+  projectId String      @map("project_id") @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  role      ProjectRole @default(MEMBER)
+  joinedAt  DateTime    @default(now()) @map("joined_at") @db.Timestamptz(3)
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([userId])
+  @@map("project_members")
+}
+
+model ProjectInvite {
+  id        String      @id @default(uuid()) @db.Uuid
+  projectId String      @map("project_id") @db.Uuid
+  email     String      @db.VarChar(320)
+  role      ProjectRole @default(MEMBER)
+  tokenHash String      @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime    @map("expires_at") @db.Timestamptz(3)
+  acceptedAt DateTime?  @map("accepted_at") @db.Timestamptz(3)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, email])
+  @@map("project_invites")
+}
+
+model Task {
+  id          String       @id @default(uuid()) @db.Uuid
+  projectId   String       @map("project_id") @db.Uuid
+  title       String       @db.VarChar(200)
+  description String?      @db.VarChar(10000)
+  status      TaskStatus   @default(OPEN)
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?    @map("due_date") @db.Timestamptz(3)
+  createdById String       @map("created_by_id") @db.Uuid
+  assigneeId  String?      @map("assignee_id") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy   User         @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  assignee    User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  comments    Comment[]
+  attachments Attachment[]
+
+  @@index([projectId, status])
+  @@index([projectId, dueDate])
+  @@index([assigneeId, status])
+  @@map("tasks")
+}
+
+model Comment {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @map("task_id") @db.Uuid
+  authorId  String   @map("author_id") @db.Uuid
+  body      String   @db.VarChar(5000)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt])
+  @@map("comments")
+}
+
+model Attachment {
+  id           String   @id @default(uuid()) @db.Uuid
+  taskId       String   @map("task_id") @db.Uuid
+  uploadedById String   @map("uploaded_by_id") @db.Uuid
+  originalName String   @map("original_name") @db.VarChar(255)
+  storageKey   String   @unique @map("storage_key") @db.VarChar(100)
+  mimeType     String   @map("mime_type") @db.VarChar(120)
+  sizeBytes    Int      @map("size_bytes")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@map("attachments")
+}
+
+model RefreshSession {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("refresh_sessions")
+}
